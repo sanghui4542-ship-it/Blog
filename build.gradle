@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.0.1'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'me.shinsunyoung'
+version = '0.0.1-SNAPSHOT'
+description = 'springboot-developer'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://repo.spring.io/milestone' }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+    implementation platform('org.springframework.ai:spring-ai-bom:2.0.0-M1')
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-h2console'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.thymeleaf.extras:thymeleaf-extras-springsecurity6'
+    // ===== [10장] JWT 관련 의존성 (교안 10.2 · 01단계) =====
+    // 추가한 뒤 IntelliJ 오른쪽 Gradle 탭에서 새로고침(Reload)을 눌러 내려받으세요.
+    // ⚠️ 교안 코드는 jjwt 0.9.1 기준입니다. 0.10 이상에서는 setSigningKey(String),
+    //    parseClaimsJws 등의 사용법이 바뀌므로 버전을 그대로 맞추세요.
+    implementation 'io.jsonwebtoken:jjwt:0.9.1'  //자바 JWT 라이브러리 (토큰 만들기 Jwts.builder(), 읽기 Jwts.parser())
+    // jjwt 0.9.1 은 내부에서 javax.xml.bind.DatatypeConverter(Base64 변환)를 씁니다.
+    // 자바 11부터 이 기능이 JDK 에서 빠졌기 때문에 따로 추가해야 실행 오류가 나지 않습니다.
+    implementation 'javax.xml.bind:jaxb-api:2.3.1' //XML 문서와 자바 객체 간 매핑 자동화
+    testImplementation 'org.springframework.security:spring-security-test'
+    runtimeOnly 'com.h2database:h2'
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

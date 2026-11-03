@@ -36,6 +36,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     //   호출하는 곳 : UserDetailService.loadUserByUsername()
     Optional<User> findByEmail(String email);
 
+
+
     // [참고] 이 아래는 쿼리 메소드 이름 규칙 설명입니다.
     //   이름 규칙으로 메소드를 만들면 SQL 을 직접 쓰지 않고 조회 기능을 만들 수 있습니다.
     //

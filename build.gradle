@@ -20,6 +20,13 @@ repositories {
 }
 
 dependencies {
+
+    // ===== [11장 추가] OAuth2 클라이언트 (구글 로그인) =====
+    // oauth2Login(), /oauth2/authorization/{등록이름}, /login/oauth2/code/{등록이름} 처리 필터,
+    // DefaultOAuth2UserService, OAuth2AuthorizationRequest 같은 클래스가 이 의존성에 들어 있습니다.
+    // application.yml 의 spring.security.oauth2.client.registration.google 설정도 이 의존성이 읽습니다.
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+
     implementation 'org.springframework.boot:spring-boot-starter'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'

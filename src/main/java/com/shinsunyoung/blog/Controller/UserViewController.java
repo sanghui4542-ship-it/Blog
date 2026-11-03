@@ -22,14 +22,14 @@ public class UserViewController {
     // ---------------------------------------------------------------
     // 로그인 화면 : GET /login
     // ---------------------------------------------------------------
-    // 로그인이 필요한 페이지에 비로그인 상태로 들어가면, WebSecurityConfig 의 loginPage("/login") 설정 때문에
-    // 이 주소로 자동 이동하게 되고, 이 메소드가 실행됩니다.
+    // GET /login → templates/oauthLogin.html 을 보여 줍니다. (11장 변경)
+    // WebOAuthSecurityConfig.java 설정파일 에서 /api/** 이외는 permitAll 이라 누구나 볼 수 있습니다.
     @GetMapping("/login")
     public String login() {
 
-        // "login" 이라는 문자열은 templates/login.html 파일 이름입니다.
+        // "login" 이라는 문자열은 templates/oauthLogin.html 파일 이름입니다.
         // 스프링의 뷰 리졸버(화면 찾는 도구)가 이 이름으로 HTML 파일을 찾아 브라우저에 보냅니다.
-        return "login";
+        return "oauthLogin";
     }
 
     // ---------------------------------------------------------------

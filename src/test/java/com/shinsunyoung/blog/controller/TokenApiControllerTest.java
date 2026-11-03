@@ -31,6 +31,14 @@ import tools.jackson.databind.ObjectMapper;                                     
 
 import java.util.Map;                                                                // "이름과 값" 짝을 담는 자료형입니다.
 
+import jakarta.servlet.http.Cookie;                                                       // [로그아웃 추가] 요청에 붙일 쿠키
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;   // [로그아웃 추가] 로그인 상태 흉내
+import org.springframework.security.core.context.SecurityContext;                         // [로그아웃 추가]
+import org.springframework.security.core.context.SecurityContextHolder;                   // [로그아웃 추가]
+
+import static org.assertj.core.api.Assertions.assertThat;                                 // [로그아웃 추가] 결과 비교
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete; // [로그아웃 추가] DELETE 요청
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;   // [로그아웃 추가] 응답 쿠키 검사
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;     // POST 요청을 만드는 메서드 post() 를 바로 쓰도록 가져옵니다.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;   // JSON 안의 값을 찾는 메서드 jsonPath() 를 바로 쓰도록 가져옵니다.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;     // HTTP 상태 코드를 검사하는 메서드 status() 를 바로 쓰도록 가져옵니다.
@@ -233,6 +241,82 @@ class TokenApiControllerTest {
         resultActions
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.accessToken").isNotEmpty());
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // [로그아웃 추가] deleteRefreshToken : 로그아웃하면 DB 의 리프레시 토큰이 삭제되는지 테스트
+    //   연결된 컨트롤러 메소드 : TokenApiController.deleteRefreshToken()  (DELETE /api/refresh-token)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    @DisplayName("deleteRefreshToken: 리프레시 토큰을 삭제한다.")
+    @Test
+    public void deleteRefreshToken() throws Exception {
+        // ───────────── given 1 : 요청 주소 준비 ─────────────
+        final String url = "/api/refresh-token";
+
+        // ───────────── given 2 : 테스트 사용자 저장 ─────────────
+        //   이메일이 createNewAccessToken 테스트와 같아도 됩니다. mockMvcSetUp() 이 테스트마다 users 테이블을 비우기 때문입니다.
+        User testUser = userRepository.save(User.builder()
+                                            .email("user@gmail.com")
+                                            .password("test")
+                                            .build());
+
+        // ───────────── given 3 : 이 사용자의 토큰 만들기 ─────────────
+        //   claim "id" 에 사용자 id 를 넣습니다. RefreshTokenService.delete() 가 이 값을 꺼내 누구의 토큰을 지울지 정합니다.
+        String token = JwtFactory.builder()
+                                 .claims(Map.of("id", testUser.getId()))
+                                 .build()
+                                 .createToken(jwtProperties);
+
+        // ───────────── given 4 : DB 에 리프레시 토큰 저장 (로그인 성공 직후 상태 흉내) ─────────────
+        //   실제로는 구글 로그인 성공 시 OAuth2SuccessHandler.saveRefreshToken() 이 저장합니다.
+        refreshTokenRepository.save(new RefreshToken(testUser.getId(), token));
+
+        // ───────────── given 5 : SecurityContext 에 인증 정보 넣기 (로그인 상태 흉내) ─────────────
+        //   이 테스트의 MockMvc 는 보안 필터(TokenAuthenticationFilter)를 거치지 않으므로, 필터가 해 줄 일을 직접 합니다.
+        //   new UsernamePasswordAuthenticationToken(principal, credentials, 권한목록)
+        //     credentials 자리에 토큰 문자열을 넣는 이유 :
+        //       RefreshTokenService.delete() 가 authentication.getCredentials() 로 토큰을 꺼내 사용자 id 를 읽기 때문입니다.
+        //       (실제 요청에서도 TokenProvider.getAuthentication() 이 credentials 에 액세스 토큰을 넣습니다)
+        SecurityContext securityContext = SecurityContextHolder.getContext();
+        securityContext.setAuthentication(new UsernamePasswordAuthenticationToken(testUser, token, testUser.getAuthorities()));
+
+        // ───────────── when : 로그아웃 요청 (DELETE /api/refresh-token) ─────────────
+        //   이 줄 안에서 일어나는 일:
+        //     (1) TokenApiController.deleteRefreshToken() 실행
+        //     (2) RefreshTokenService.delete() → getCredentials() 로 토큰 꺼냄 → getUserId(token) → deleteByUserId(id)
+        //         → SQL: select ... from refresh_token where user_id=?  →  delete from refresh_token where id=?
+        //     (3) CookieUtil.deleteCookie(...) : 요청에 쿠키가 없으므로 아무것도 하지 않음
+        //     (4) 200 응답
+        mockMvc.perform(delete(url).contentType(MediaType.APPLICATION_JSON_VALUE))
+                .andExpect(status().isOk());
+
+        // ───────────── then : DB 에서 그 리프레시 토큰이 사라졌는지 확인 ─────────────
+        //   findByRefreshToken(token) 결과(Optional)가 비어 있으면(isEmpty) 삭제 성공입니다.
+        assertThat(refreshTokenRepository.findByRefreshToken(token)).isEmpty();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // [로그아웃 추가] deleteRefreshTokenCookie : 로그아웃 응답이 브라우저의 refresh_token 쿠키도 지우는지 테스트
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    @DisplayName("deleteRefreshToken: 로그아웃 응답에 refresh_token 쿠키 삭제(Max-Age=0)가 들어 있다.")
+    @Test
+    public void deleteRefreshTokenCookie() throws Exception {
+        // given : 사용자 · 토큰 · DB 저장 · 인증 정보 (위 테스트와 같은 준비)
+        User testUser = userRepository.save(User.builder().email("user@gmail.com").password("test").build());
+        String token = JwtFactory.builder().claims(Map.of("id", testUser.getId())).build().createToken(jwtProperties);
+        refreshTokenRepository.save(new RefreshToken(testUser.getId(), token));
+        SecurityContextHolder.getContext()
+                .setAuthentication(new UsernamePasswordAuthenticationToken(testUser, token, testUser.getAuthorities()));
+
+        // when : 브라우저처럼 refresh_token 쿠키를 붙여서 로그아웃 요청
+        //   new Cookie("refresh_token", token) : OAuth2SuccessHandler 가 로그인 때 만들어 준 쿠키를 흉내 냅니다.
+        // then :
+        //   cookie().maxAge("refresh_token", 0) : 응답의 Set-Cookie 에 refresh_token 의 Max-Age 가 0 → 브라우저가 쿠키를 지움
+        //   cookie().path("refresh_token", "/") : 처음 만들 때와 같은 Path=/ 여야 같은 쿠키로 보고 지웁니다.
+        mockMvc.perform(delete("/api/refresh-token").cookie(new Cookie("refresh_token", token)))
+                .andExpect(status().isOk())
+                .andExpect(cookie().maxAge("refresh_token", 0))
+                .andExpect(cookie().path("refresh_token", "/"));
     }
 }
 

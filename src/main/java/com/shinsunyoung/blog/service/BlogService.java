@@ -1,162 +1,151 @@
+// 파일 위치: src/main/java/me/shinsunyoung/springbootdeveloper/service/BlogService.java
+//
 // ============================================================
-// 파일 경로
-// src/main/java/me/shinsunyoung/springbootdeveloper/service/BlogService.java
+// 이 파일이 하는 일
 // ============================================================
+// 블로그 글의 저장·조회·삭제·수정 "업무 처리"를 맡은 서비스입니다.
 //
-// [이 클래스의 역할]
+// ============================================================
+// 10장 → 11장, 무엇이 바뀌었나  ("내 글만 고칠 수 있게")
+// ============================================================
+//   메서드     10장                          11장
+//   ────────   ───────────────────────────   ───────────────────────────────────────────────────────
+//   save       save(request)                 save(request, userName) → 글쓴이(userName)를 함께 저장
+//   delete     deleteById(id) 바로 삭제       글을 찾아서 → 글쓴이 확인 → delete(article)
+//   update     찾아서 바로 수정               글을 찾아서 → 글쓴이 확인 → 수정
+//   (새 메서드)  -                            authorizeArticleAuthor(): 글쓴이와 요청한 사람 비교
 //
-// 블로그 글(Article)에 관한 업무를 처리하는 서비스 클래스입니다.
-// 컨트롤러는 요청을 받아 이 클래스에 일을 맡기고, 이 클래스는 리포지토리를 통해 DB 작업을 합니다.
+// ============================================================
+// "지금 요청한 사람"은 어디서 알까요?
+// ============================================================
+//   1. 브라우저가 Authorization: Bearer 액세스토큰 헤더를 붙여 요청
+//   2. TokenAuthenticationFilter 가 토큰 검사 → TokenProvider.getAuthentication(token)
+//        → 이름(name) = 토큰의 sub = 이메일 인 인증 정보를 SecurityContextHolder 에 넣음
+//   3. 이 서비스에서 SecurityContextHolder.getContext().getAuthentication().getName() 으로 꺼냄
+//        → "gildong@gmail.com"
+//   SecurityContextHolder 는 "지금 이 요청을 처리하는 스레드"마다 따로 있는 보관함이라서,
+//   컨트롤러에서 값을 넘겨받지 않아도 서비스에서 바로 꺼낼 수 있습니다.
 //
-// [호출하는 곳]
+// ============================================================
+// 수정·삭제 흐름 예 (남의 글을 지우려 할 때)
+// ============================================================
+//   DELETE /api/articles/1  (요청자: gildong@gmail.com, 1번 글 author: user1)
+//     → delete(1) → 글 찾음 → authorizeArticleAuthor(): "user1" ≠ "gildong@gmail.com"
+//     → ResponseStatusException(403, "not authorized") 발생 → 삭제 안 됨   ([수정·삭제 완성] 예전: IllegalArgumentException, 500)
+//     → 예외를 처리하는 코드가 없으므로 응답은 500 오류 → article.js 가 "삭제 실패했습니다." 알림
 //
-// 1. BlogApiController  : save, findAll, findById, delete, update 를 호출합니다. (JSON API)
-// 2. BlogViewController : findAll, findById 를 호출합니다. (화면)
-//
-// [수정 내용]
-//
-// 글을 찾지 못하면 이제 ArticleNotFoundException(404)을 던집니다.
-// 예전에는 IllegalArgumentException(500)을 던졌습니다.
+// ============================================================
+// 꼭 조심할 점
+// ============================================================
+// 1. ✅ [해결] 권한이 없을 때 예전에는 IllegalArgumentException 이라 응답이 500 이었습니다.
+//    지금은 ResponseStatusException(HttpStatus.FORBIDDEN) 을 던져 403(권한 없음)으로 응답합니다. (authorizeArticleAuthor 참고)
+// 2. findAll(), findById() 는 글쓴이를 확인하지 않습니다. 글 읽기는 누구나 할 수 있습니다.
+// 3. @Transactional 을 jakarta.transaction 패키지에서 가져왔습니다. (10장은 org.springframework.transaction.annotation)
+//    스프링은 두 종류 모두 알아보므로 이 프로젝트에서는 동작이 같습니다.
+// ============================================================
 
+
+// 이 파일이 속한 폴더 이름입니다. 업무 처리 클래스들을 모아 두는 폴더입니다.
 package com.shinsunyoung.blog.service;
 
-
-// [1. Lombok 관련 import]
-//
-// @RequiredArgsConstructor 를 쓰기 위한 import 입니다.
-// final 필드(blogRepository)를 받는 생성자를 자동으로 만들어 줍니다.
-import com.shinsunyoung.blog.domain.Article;
-import com.shinsunyoung.blog.dto.AddArticleRequest;
-import com.shinsunyoung.blog.exception.ArticleNotFoundException;
 import com.shinsunyoung.blog.repository.BlogRepository;
-import lombok.RequiredArgsConstructor;
+import jakarta.transaction.Transactional;                                // 메서드 전체를 하나의 작업 단위(트랜잭션)로 묶는 표시입니다. [11장] jakarta 쪽으로 바뀜
+import lombok.RequiredArgsConstructor;                                   // final 변수를 받는 생성자를 만듭니다.
+import com.shinsunyoung.blog.domain.Article;                // 글 클래스입니다.
+import com.shinsunyoung.blog.dto.AddArticleRequest;        // 글 등록 요청 그릇입니다.
+import com.shinsunyoung.blog.dto.UpdateArticleRequest;     // 글 수정 요청 그릇입니다.
+import com.shinsunyoung.blog.repository.BlogRepository;    // article 표를 다루는 도구입니다.
+import org.springframework.security.core.context.SecurityContextHolder;  // [11장] 지금 요청한 사용자의 인증 정보가 들어 있는 보관함입니다.
+import org.springframework.stereotype.Service;                           // 스프링 빈(서비스)으로 등록하는 표시입니다.
+import org.springframework.http.HttpStatus;                              // [수정·삭제 완성 추가] 403(FORBIDDEN) 같은 상태 코드 상수
+import org.springframework.web.server.ResponseStatusException;           // [수정·삭제 완성 추가] 던지면 지정한 상태 코드로 응답되는 예외
 
+import java.util.List; // 여러 글을 담는 목록 자료형입니다.
 
-// [2. 프로젝트 내부 import]
-//
-// Article                  : 글 엔티티입니다. 반환 타입으로 씁니다.
-// AddArticleRequest        : 글 등록 요청 상자 (DTO)
-// UpdateArticleRequest     : 글 수정 요청 상자 (DTO)
-// BlogRepository           : article 테이블에 접근하는 리포지토리입니다.
-// ArticleNotFoundException : 글이 없을 때 던지는 404 전용 예외입니다.
-import com.shinsunyoung.blog.domain.Article;
-import com.shinsunyoung.blog.dto.AddArticleRequest;
-import com.shinsunyoung.blog.dto.UpdateArticleRequest;
-import com.shinsunyoung.blog.exception.ArticleNotFoundException;
-import com.shinsunyoung.blog.repository.BlogRepository;
-
-
-// [3. 스프링 관련 import]
-//
-// @Service        : 업무 처리 담당 객체로 스프링에 등록합니다.
-// @Transactional  : 메서드 안의 DB 작업을 하나의 묶음(트랜잭션)으로 처리합니다.
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-
-// [4. 자바 기본 자료형 import]
-//
-// List : 여러 글을 담는 목록입니다.
-import java.util.List;
-
-
-// [5. 클래스 위의 어노테이션]
-
-// @RequiredArgsConstructor
-// - 아래 final 필드 blogRepository 를 받는 생성자를 자동으로 만듭니다.
-// - 스프링이 이 생성자를 보고 BlogRepository 객체를 넣어 줍니다. (생성자 주입)
 @RequiredArgsConstructor
-
-// @Service
-// - 업무 처리 담당 객체로 스프링에 등록합니다.
 @Service
 public class BlogService {
 
+    private final BlogRepository blogRepository; // article 표를 다루는 도구. 스프링이 넣어 줍니다.
 
-    // [6. 리포지토리 필드]
-    // - article 테이블 작업을 맡는 객체입니다. 스프링이 생성자로 넣어 줍니다.
-    private final BlogRepository blogRepository;
-
-
-    // [7. save : 새 글 저장]
-    //
-    // - 호출하는 곳 : BlogApiController.addArticle()
-    // - 매개변수 request : 브라우저가 보낸 제목, 본문, 이미지 주소 상자입니다.
-    // - 반환값 : 저장된 Article 객체 (id 번호가 채워져 있습니다)
-    public Article save(AddArticleRequest request) {
-
-        // request.toEntity() : 요청 상자의 값을 Article 객체로 바꿉니다.
-        // blogRepository.save(...) : 그 객체를 article 테이블에 INSERT 하고, 저장된 객체를 돌려줍니다.
-        return blogRepository.save(request.toEntity());
+    // ------------------------------------------------------------
+    // save: 글 저장
+    // 누가 부르나요: BlogApiController.addArticle() — principal.getName()(이메일)을 userName 으로 넘김
+    // 받는 값   : request(제목·본문·이미지), userName(글쓴이 = 토큰 주인 이메일)
+    // 돌려주는 값: 저장된 Article (id, createdAt 이 채워진 상태)
+    // ------------------------------------------------------------
+    public Article save(AddArticleRequest request, String userName) {
+        return blogRepository.save(request.toEntity(userName));
     }
 
-
-    // [8. findAll : 모든 글 목록 조회]
-    //
-    // - 호출하는 곳 : BlogApiController.findAllArticles(), BlogViewController.getArticles()
+    // findAll: 모든 글 조회. 글쓴이 확인 없음 (누구나 읽기 가능)
     public List<Article> findAll() {
-
-        // blogRepository.findAll() : article 테이블의 모든 행을 SELECT 해서 목록으로 돌려줍니다.
         return blogRepository.findAll();
     }
 
-
-    // [9. findById : 번호로 글 1개 조회]
-    //
-    // - 호출하는 곳 : BlogApiController.findArticle(), BlogViewController.getArticle(), BlogViewController.newArticle()
-    // - 매개변수 id : 찾을 글 번호
-    // - 글이 없으면 ArticleNotFoundException 이 던져지고, 응답은 404 가 됩니다. [수정 내용]
+    // findById: 글 한 개 조회. 없으면 IllegalArgumentException("not found: 번호")
     public Article findById(long id) {
-
-        // [9-1] blogRepository.findById(id)
-        // - 번호로 찾은 결과를 Optional 상자에 담아 돌려줍니다. (있으면 Article, 없으면 빈 상자)
         return blogRepository.findById(id)
-
-                // [9-2] orElseThrow(...)
-                // - 상자가 비어 있으면 괄호 안의 예외를 던집니다.
-                // - 상자에 글이 있으면 그 Article 을 꺼내서 return 으로 넘깁니다.
-                .orElseThrow(() -> new ArticleNotFoundException(id));
+                .orElseThrow(() -> new IllegalArgumentException("not found: " + id));
     }
 
-
-    // [10. delete : 글 삭제]
-    //
-    // - 호출하는 곳 : BlogApiController.deleteArticle()
-    // - 삭제 전에 글이 있는지 먼저 확인합니다. [수정 내용]
-    //   예전에는 없는 번호를 지우면 Spring Data 가 던지는 예외 때문에 500 오류가 났습니다.
+    // ------------------------------------------------------------
+    // delete: 글 삭제 (글쓴이만 가능)
+    // 순서: ① 글 찾기 → ② 글쓴이 확인 → ③ 삭제
+    // 10장은 deleteById(id) 로 바로 지웠지만, 글쓴이를 확인하려면 먼저 글을 꺼내야 해서 순서가 바뀌었습니다.
+    // ------------------------------------------------------------
     public void delete(long id) {
+        // ① 글 찾기. 없으면 "not found : 번호" 오류
+        Article article = blogRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("not found : " + id));
 
-        // [10-1] existsById(id) : 이 번호의 글이 DB 에 있으면 true, 없으면 false 를 돌려줍니다.
-        // !existsById(id) : "없다"면 (true 가 되어) 아래 if 문 안으로 들어갑니다.
-        if (!blogRepository.existsById(id)) {
-
-            // [10-2] 글이 없으면 404 전용 예외를 던지고 메서드를 끝냅니다. (아래 삭제 줄은 실행되지 않습니다)
-            throw new ArticleNotFoundException(id);
-        }
-
-        // [10-3] 글이 있을 때만 여기까지 옵니다. article 테이블에서 이 번호의 행을 DELETE 합니다.
-        blogRepository.deleteById(id);
+        // ② 지금 요청한 사람이 글쓴이인지 확인. 아니면 여기서 오류가 나고 아래 줄은 실행되지 않습니다.
+        authorizeArticleAuthor(article);
+        // ③ 삭제. 실행 SQL 예) DELETE FROM article WHERE id = 1
+        blogRepository.delete(article);
     }
 
-
-    // [11. update : 글 수정]
-    //
-    // - 호출하는 곳 : BlogApiController.updateArticle()
-    // - @Transactional 이 붙어 있으므로, 객체 값만 바꿔도 메서드가 끝날 때 DB 에 UPDATE 가 저장됩니다.
-    //   (save()를 따로 부르지 않아도 되는 이유이며, 이를 '변경 감지'라고 부릅니다)
+    // ------------------------------------------------------------
+    // update: 글 수정 (글쓴이만 가능)
+    // @Transactional: 메서드가 끝날 때 바뀐 값을 데이터베이스에 반영(UPDATE)합니다. (변경 감지)
+    // ------------------------------------------------------------
     @Transactional
     public Article update(long id, UpdateArticleRequest request) {
-
-        // [11-1] 수정할 글을 DB 에서 찾습니다.
-        // - 글이 없으면 ArticleNotFoundException(404)이 던져져서 아래 줄은 실행되지 않습니다. [수정 내용]
+        // ① 글 찾기
         Article article = blogRepository.findById(id)
-                .orElseThrow(() -> new ArticleNotFoundException(id));
+                .orElseThrow(() -> new IllegalArgumentException("not found : " + id));
 
-        // [11-2] 찾은 글의 제목, 본문, 이미지 주소를 요청 값으로 바꿉니다.
-        // - Article.update() 메서드가 필드 값을 바꿉니다.
+        // ② 글쓴이 확인
+        authorizeArticleAuthor(article);
+        // ③ 값 바꾸기 (save 를 부르지 않아도 트랜잭션이 끝날 때 UPDATE 됨)
         article.update(request.getTitle(), request.getContent(), request.getImageUrl());
 
-        // [11-3] 바뀐 글 객체를 호출한 곳(BlogApiController.updateArticle)으로 돌려줍니다.
         return article;
+    }
+
+
+    // ------------------------------------------------------------
+    // [11장 추가] authorizeArticleAuthor: 글쓴이 확인
+    // ------------------------------------------------------------
+    // private static : 이 클래스 안에서만, 객체 없이 쓰는 도우미 메서드입니다.
+    // 1. SecurityContextHolder.getContext()  : 지금 요청의 보안 상자를 꺼냅니다.
+    // 2. .getAuthentication()                : 그 안의 인증 정보 (TokenAuthenticationFilter 가 넣은 것)
+    // 3. .getName()                          : 사용자 이름 = 토큰의 sub = 이메일
+    // 4. 글의 author 와 다르면 "not authorized" 오류를 던집니다.
+    // ⚠️ 인증 정보가 없으면 getAuthentication() 이 null 이라 오류가 날 수 있지만,
+    //    /api/** 는 WebOAuthSecurityConfig 에서 authenticated 라서 인증 없이 여기까지 오지 못합니다.
+    //
+    // [수정·삭제 완성 - 변경] 예외 종류를 IllegalArgumentException → ResponseStatusException(403 FORBIDDEN) 으로 바꿨습니다.
+    //   예전 : 남의 글을 수정·삭제하면 처리되지 않은 예외라서 응답이 500(서버 오류)이었습니다.
+    //          화면에서는 "실패했습니다" 만 보여서, 서버 고장인지 권한 문제인지 알 수 없었습니다.
+    //   지금 : ResponseStatusException 은 스프링 MVC 가 알아보는 예외라서, 던지면 지정한 상태 코드(403)로 응답합니다.
+    //          403 = "누구인지는 알지만(로그인은 됨) 이 일을 할 권한이 없다" 는 뜻의 표준 상태 코드입니다.
+    //          article.js 의 fail(response) 가 403 을 보고 "본인이 작성한 글만 …" 안내를 띄웁니다.
+    //   ※ 글쓴이 본인이면 예외가 나지 않으므로 수정·삭제는 그대로 성공(200)합니다.
+    private static void authorizeArticleAuthor(Article article) {
+        String userName = SecurityContextHolder.getContext().getAuthentication().getName();
+        if (!article.getAuthor().equals(userName)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "not authorized"); // [변경] 500 → 403
+        }
     }
 }

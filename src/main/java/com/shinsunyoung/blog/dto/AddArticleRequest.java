@@ -38,10 +38,11 @@ public class AddArticleRequest {
 
     // toEntity : 이 DTO 의 값을 DB 에 저장할 Article 엔티티로 바꿔서 돌려줍니다.
     //   호출하는 곳 : BlogService.save() 메소드
-    public Article toEntity() {
+    public Article toEntity(String author) {
         return Article.builder()        // Article 의 빌더(값을 하나씩 채우는 도구)를 시작합니다.
                 .title(title)           // 이 DTO 의 제목을 넣습니다.
                 .content(content)       // 본문을 넣습니다.
+                .author(author)
                 .imageUrl(imageUrl)     // 이미지 주소를 넣습니다.
                 .build();               // 지금까지 넣은 값으로 Article 객체를 완성해서 돌려줍니다.
     }

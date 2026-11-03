@@ -1,13 +1,19 @@
 package com.shinsunyoung.blog.controller;
 
 import com.shinsunyoung.blog.domain.Article;
+import com.shinsunyoung.blog.domain.User;                      // [11.5 추가] 테스트용 로그인 사용자 엔티티
 import com.shinsunyoung.blog.dto.AddArticleRequest;
 import com.shinsunyoung.blog.dto.UpdateArticleRequest;
 import com.shinsunyoung.blog.repository.BlogRepository;
+import com.shinsunyoung.blog.repository.UserRepository;        // [11.5 추가] users 테이블 저장소
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;                                     // [11.5 추가] 가짜(Mock) Principal 객체를 만드는 도구
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken; // [11.5 추가]
+import org.springframework.security.core.context.SecurityContext;                       // [11.5 추가]
+import org.springframework.security.core.context.SecurityContextHolder;                 // [11.5 추가]
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -17,6 +23,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.ObjectMapper;
 
+import java.security.Principal;                                 // [11.5 추가] addArticle() 이 받는 로그인 사용자 타입
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +65,36 @@ class BlogApiControllerTest {
     //                             테스트 데이터를 넣고, 결과를 DB 에서 직접 확인할 때 씁니다.
     @Autowired
     BlogRepository blogRepository;
+
+    // [11.5 추가] users 테이블 저장소입니다. 테스트용 사용자를 저장할 때 씁니다.
+    @Autowired
+    UserRepository userRepository;
+
+    // [11.5 추가] 테스트에서 "로그인한 사용자" 역할을 하는 User 객체입니다.
+    //   createDefaultArticle() 이 이 사용자의 이름(이메일)을 글쓴이(author)로 넣습니다.
+    User user;
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // [11.5 추가] 공통 준비 2 : 인증 정보(SecurityContext) 설정
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // 왜 필요한가?
+    //   11장에서 BlogService.update()/delete() 가 authorizeArticleAuthor() 로
+    //   SecurityContextHolder 의 로그인 사용자 이름과 글의 author 가 같은지 검사하게 바뀌었습니다.
+    //   테스트는 실제 로그인을 하지 않으므로, 여기서 직접 SecurityContext 에 인증 정보를 넣어 줍니다.
+    @BeforeEach
+    void setSecurityContext() {
+        userRepository.deleteAll();   // users 테이블 비우기 (같은 이메일 중복 저장 오류 방지)
+
+        // 테스트용 사용자 저장 → getUsername() 은 email("user@gmail.com") 을 돌려줍니다.
+        user = userRepository.save(User.builder()
+                .email("user@gmail.com")
+                .password("test")
+                .build());
+
+        // SecurityContext 에 "이 사용자가 로그인했다" 는 인증 객체를 넣습니다.
+        SecurityContext context = SecurityContextHolder.getContext();
+        context.setAuthentication(new UsernamePasswordAuthenticationToken(user, user.getPassword(), user.getAuthorities()));
+    }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
     // 공통 준비 : 모든 테스트 메소드가 실행되기 직전마다 실행됩니다.
@@ -115,10 +152,18 @@ class BlogApiControllerTest {
         //     (1) MockMvc 가 요청을 DispatcherServlet 객체에 넘깁니다.
         //     (2) DispatcherServlet 이 주소 /api/articles 와 POST 를 보고 BlogApiController.addArticle 을 고릅니다.
         //     (3) 본문의 JSON 을 AddArticleRequest 객체로 바꿔 addArticle 의 매개변수 @RequestBody 에 넣습니다.
-        //     (4) addArticle 은 로그인 사용자 Principal 도 함께 받습니다. 이 테스트는 로그인하지 않았습니다.
+        //     (4) addArticle 은 로그인 사용자 Principal 도 함께 받습니다.
         //   돌려주는 값 result : 응답 결과 상자(ResultActions)입니다.
+        //
+        // [11.5 변경] 기존 코드는 Principal 없이 요청해서 addArticle() 안의 principal.getName() 에서
+        //   NullPointerException 이 났습니다. Mockito 로 가짜 Principal 을 만들고 .principal(principal) 로 넣습니다.
+        //   principal.getName() 을 부르면 "username" 을 돌려주도록 설정합니다.
+        Principal principal = Mockito.mock(Principal.class);
+        Mockito.when(principal.getName()).thenReturn("username");
+
         ResultActions result = mockMvc.perform(post(url)
                                                 .contentType(MediaType.APPLICATION_JSON_VALUE)
+                                                .principal(principal)          // [11.5 추가]
                                                 .content(requestBody));
 
         // ───────────── 5단계  Then1 : 블로그 글 등록(새글 추가)에 성공했다면 응답 상태 코드가 201(Created)인지 검사 확인 ─────────────
@@ -134,6 +179,7 @@ class BlogApiControllerTest {
         assertThat(articles.size()).isEqualTo(1);           // article테이블에 추가(INSERT)한 블로그 새글 레코드 갯수가 1개이면 테스트 통과
         assertThat(articles.get(0).getTitle()).isEqualTo(title);    // article테이블에 추가(INSERT)한 블로그 새글의 제목과 요청한 새글 제목과 같으면? 테스트 통과
         assertThat(articles.get(0).getContent()).isEqualTo(content);// article테이블에 추가(INSERT)한 블로그 새글의 내용과 요청한 새글 내용과 같으면? 테스트 통과
+        assertThat(articles.get(0).getAuthor()).isEqualTo("username"); // [11.5 추가] 글쓴이가 Principal 이름으로 저장됐는지 확인
 
     }
 
@@ -154,11 +200,9 @@ class BlogApiControllerTest {
         // 호출하는 줄 : blogRepository.save(Article.builder().title(title).content(content).build())
         //   Article.builder() : Article 의 빌더로 객체를 만듭니다. id 는 DB 가 채웁니다.
         //   save : 객체를 article 테이블에 저장합니다. (insert)
-        blogRepository.save(Article.builder()
-                                   .title(title)
-                                   .content(content)
-                                    .build() );
-//      blogRepository.save(new Article(title, content));
+        // [11.5 변경] author(nullable=false) 없이 저장하면 DataIntegrityViolationException 이 납니다.
+        //   글쓴이까지 채워 저장하는 createDefaultArticle() 로 바꿨습니다. (기존: blogRepository.save(Article.builder().title(title).content(content).build()))
+        Article savedArticle = createDefaultArticle();
 
         // ───────────── 3단계  when :  블로그 글 목록 조회 API 요청 ─────────────
         // 호출하는 줄 : mockMvc.perform(get(url).accept(JSON))
@@ -176,8 +220,8 @@ class BlogApiControllerTest {
         //     [0]   :  JSONArray배열의 첫 번째 글 레코드
         resultActions
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].content").value(content))
-                .andExpect(jsonPath("$[0].title").value(title));
+                .andExpect(jsonPath("$[0].content").value(savedArticle.getContent()))  // [11.5 변경] content → savedArticle.getContent()
+                .andExpect(jsonPath("$[0].title").value(savedArticle.getTitle()));     // [11.5 변경] title → savedArticle.getTitle()
 
 
     }
@@ -195,7 +239,8 @@ class BlogApiControllerTest {
         final String content = "content";        //글 한개 조회 요청 테스트 하기 위해 글 저장(INSERT)할 글내용 데이터 준비
 
         // ───────────── 2단계 given2 : 글 한개 조회 테스트하기 위해  글 저장 ─────────────
-        Article savedArticle = blogRepository.save(Article.builder().title(title).content(content).build()); //INSERT
+        // [11.5 변경] author 가 필수라서 createDefaultArticle() 로 저장합니다. (기존: Article.builder().title(title).content(content).build())
+        Article savedArticle = createDefaultArticle(); //INSERT
 
         // ───────────── 3단계 when : 글한 개 조회 요청 ─────────────
         // 호출하는 줄 : get(url, savedArticle.getId())
@@ -210,8 +255,8 @@ class BlogApiControllerTest {
         //   jsonPath("$.title")    : title 값 확인
         resultActions
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").value(content))
-                .andExpect(jsonPath("$.title").value(title));
+                .andExpect(jsonPath("$.content").value(savedArticle.getContent()))  // [11.5 변경] content → savedArticle.getContent()
+                .andExpect(jsonPath("$.title").value(savedArticle.getTitle()));     // [11.5 변경] title → savedArticle.getTitle()
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -229,10 +274,9 @@ class BlogApiControllerTest {
 
         // ───────────── 2단계  given2 : 삭제할 더미 글을 DB 에 저장(INSERT) ─────────────
         // 저장(INSERT)된 객체 savedArticle 에 DB 가 채운 id 가 들어 있습니다. 이 id 로 삭제 요청을 보냅니다.
-        Article savedArticle = blogRepository.save(Article.builder()
-                                                          .title(title)
-                                                          .content(content)
-                                                          .build()); //INSERT
+        // [11.5 변경] author 가 필수이고, 삭제는 "글쓴이 본인"만 가능하므로
+        //   SecurityContext 의 사용자(user)를 글쓴이로 넣어 주는 createDefaultArticle() 로 저장합니다.
+        Article savedArticle = createDefaultArticle(); //INSERT
         // ───────────── 3단계  when : 글 한 개 삭제 요청 ─────────────
         // 호출하는 줄 : mockMvc.perform(delete(url, savedArticle.getId())).andExpect(status().isOk())
         //   delete(url, id) : DELETE 방식 요청을 만들고, {id} 자리에 savedArticle.getId() 를 넣습니다.
@@ -241,16 +285,14 @@ class BlogApiControllerTest {
         //   이 줄 안에서 일어나는 일 (순서대로):
         //     (1) DispatcherServlet 객체가 BlogApiController.deleteArticle(long id) 를 실행합니다.
         //     (2) BlogApiController.deleteArticle(long id) 는 blogService.delete(id) 를 호출합니다.
-        //     (3) BlogService.delete(long id) 는 먼저 blogRepository.existsById(id) 로 글이 있는지만 확인합니다.
-        //         → SQL: select count(*) from article where id=?   (글 전체가 아니라 개수만 셉니다)
-        //         없으면 ResponseStatusException(HttpStatus.NOT_FOUND, "not found: id") 를 던집니다. (테스트 8 에서 확인)
-        //     (4) 있으면 blogRepository.deleteById(id) 를 호출합니다.
-        //         SimpleJpaRepository.deleteById 는 @Transactional 이라 자기 트랜잭션을 시작합니다.
-        //         그 안에서 findById(id) 로 글을 다시 읽어 1차 캐시에 넣고(→ SQL: select ... where id=?),
-        //         em.remove(객체) 로 "삭제 예정" 상태로 바꿉니다. DELETE SQL 은 쓰기 지연 저장소에 쌓입니다.
-        //     (5) deleteById 메소드가 끝나면서 트랜잭션이 커밋됩니다. 커밋 직전 flush 로 DELETE SQL 이 DB 로 나갑니다.
+        //     [11.5 변경] 11장 BlogService.delete() 기준으로 설명을 고쳤습니다.
+        //     (3) BlogService.delete(long id) 는 blogRepository.findById(id) 로 글을 읽습니다.
+        //         → SQL: select ... from article where id=?
+        //         없으면 IllegalArgumentException("not found : id") 를 던집니다.
+        //     (4) authorizeArticleAuthor(article) 가 SecurityContextHolder 의 사용자 이름("user@gmail.com")과
+        //         글의 author 가 같은지 확인합니다. 다르면 IllegalArgumentException("not authorized").
+        //     (5) 같으면 blogRepository.delete(article) 로 삭제합니다.
         //         → SQL: delete from article where id=?
-        //         (BlogService.delete 에는 @Transactional 이 없으므로, existsById 와 deleteById 는 서로 다른 트랜잭션입니다)
         //     (6) deleteArticle 이 ResponseEntity.ok().build() 로 본문 없이 200 을 돌려줍니다.
         mockMvc.perform(delete(url, savedArticle.getId()))
                 .andExpect(status().isOk());
@@ -266,7 +308,7 @@ class BlogApiControllerTest {
         assertThat(articles).isEmpty();
 
         //전체 SQL 실행 순서
-        //  더미 insert → select count(where id=?) → select(where id=?) → delete(where id=?) → select
+        //  더미 insert → select(where id=?) → delete(where id=?) → select     // [11.5 변경]
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════
@@ -283,10 +325,8 @@ class BlogApiControllerTest {
         final  String content = "content";        //수정 요청 테스트를 위해 DB에 INSERT 할 더미 글 내용 값 준비
 
         // ───────────── 2단계  given2 : 수정요청 테스트를 위해  더미 글을 DB 에 저장(INSERT) ─────────────
-        Article savedArticle = blogRepository.save(Article.builder()
-                                                        .title(title)
-                                                        .content(content)
-                                                        .build()); //INSERT
+        // [11.5 변경] 수정도 "글쓴이 본인"만 가능하므로 createDefaultArticle() 로 저장합니다.
+        Article savedArticle = createDefaultArticle(); //INSERT
 
         // ───────────── 3단계  given3 : 수정할 새 제목과 새 내용 준비 ─────────────
         final String newTitle = "new Title";        //수정할 새 제목 준비
@@ -311,7 +351,8 @@ class BlogApiControllerTest {
         //     (4) BlogService.update(long id, UpdateArticleRequest request) 는 @Transactional 메소드라서 트랜잭션을 시작합니다.
         //     (5) blogRepository.findById(id) 로 글을 조회합니다. → SQL: select ... where id=?
         //         조회한 Article 객체는 이 트랜잭션의 1차 캐시에 들어가 영속 상태입니다. JPA 는 처음 읽은 값(title, content)을 기억해 둡니다.
-        //         글이 없으면 ResponseStatusException(HttpStatus.NOT_FOUND, "not found: id") 를 던집니다. (테스트 7 에서 확인)
+        //         글이 없으면 IllegalArgumentException("not found : id") 를 던집니다.                       // [11.5 변경]
+        //         이어서 authorizeArticleAuthor(article) 로 글쓴이 본인인지 확인합니다.                        // [11.5 추가]
         //     (6) article.update(request.getTitle(), request.getContent()) 를 호출합니다.
         //         Article 의 update 메소드가 title, content 필드 값을 바꿉니다. 이 줄에서는 SQL 이 나가지 않습니다.
         //         [메모리 상태]  1차 캐시 : { Article { id=<번호>, title="new title", content="new content" } : 영속 }
@@ -343,6 +384,68 @@ class BlogApiControllerTest {
         // DB 에서 수정 후 조회된 글내용이 수정요청시 사용한 새 내용("new Content")과 같은지 확인합니다.
         assertThat(article.getContent()).isEqualTo(newContent);
 
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // [수정·삭제 완성 추가] 테스트 6 : 남의 글은 수정할 수 없다 (403)
+    //   BlogService.authorizeArticleAuthor() 가 글쓴이가 아니면 ResponseStatusException(403) 을 던집니다.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    @DisplayName("updateArticle(): 다른 사람이 쓴 글은 수정할 수 없다 (403).")
+    @Test
+    public void updateArticleByOtherUser() throws Exception {
+        // given : 글쓴이가 "other@gmail.com" 인 글을 저장합니다.
+        //   지금 로그인한 사람(setSecurityContext 의 user)은 "user@gmail.com" 이므로 글쓴이가 아닙니다.
+        Article othersArticle = blogRepository.save(Article.builder()
+                .title("title")
+                .content("content")
+                .author("other@gmail.com")
+                .build());
+        String body = objectMapper.writeValueAsString(new UpdateArticleRequest("new title", "new content"));
+
+        // when & then : 수정 요청 → 403(FORBIDDEN) 이어야 합니다.
+        mockMvc.perform(put("/api/articles/{id}", othersArticle.getId())
+                        .contentType(MediaType.APPLICATION_JSON_VALUE)
+                        .content(body))
+                .andExpect(status().isForbidden());
+
+        // then : DB 의 글이 바뀌지 않았는지 확인합니다. (@Transactional 메소드에서 예외 → 롤백)
+        Article article = blogRepository.findById(othersArticle.getId()).get();
+        assertThat(article.getTitle()).isEqualTo("title");
+        assertThat(article.getContent()).isEqualTo("content");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // [수정·삭제 완성 추가] 테스트 7 : 남의 글은 삭제할 수 없다 (403)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    @DisplayName("deleteArticle(): 다른 사람이 쓴 글은 삭제할 수 없다 (403).")
+    @Test
+    public void deleteArticleByOtherUser() throws Exception {
+        // given : 다른 사람이 쓴 글 저장
+        Article othersArticle = blogRepository.save(Article.builder()
+                .title("title")
+                .content("content")
+                .author("other@gmail.com")
+                .build());
+
+        // when & then : 삭제 요청 → 403
+        mockMvc.perform(delete("/api/articles/{id}", othersArticle.getId()))
+                .andExpect(status().isForbidden());
+
+        // then : 글이 그대로 남아 있어야 합니다.
+        assertThat(blogRepository.findById(othersArticle.getId())).isPresent();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    // [11.5 추가] 공통 도우미 : 테스트용 글 한 개를 글쓴이(author)까지 채워 저장합니다.
+    //   author = user.getUsername() = "user@gmail.com" (setSecurityContext() 에서 로그인시킨 사용자)
+    //   그래서 수정/삭제 테스트에서 authorizeArticleAuthor() 검사를 통과합니다.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════
+    private Article createDefaultArticle() {
+        return blogRepository.save(Article.builder()
+                .title("title")
+                .author(user.getUsername())
+                .content("content")
+                .build());
     }
 
 

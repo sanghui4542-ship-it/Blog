@@ -72,14 +72,40 @@ spring:
           # model : openrouter/free 무료 모델. 텍스트만 가능하고 이미지 생성은 지원하지 않습니다.
           model: openrouter/free
 
+  # ===== [11장 추가] OAuth2 클라이언트(구글 로그인) 설정 =====
+  # spring-boot-starter-oauth2-client 가 이 값을 읽어 "google" 이라는 로그인 등록 정보를 만든다.
+  # 구글 로그인 주소, 토큰 주소, 사용자 정보 주소는 스프링 부트가 이미 알고 있어서(CommonOAuth2Provider)
+  # client-id, client-secret, scope 만 적으면 된다.
+  security:
+    oauth2:
+      client:
+        registration:
+          # 등록 이름. 로그인 시작 주소 /oauth2/authorization/google,
+          # 구글이 돌려보낼 주소 /login/oauth2/code/google 의 "google" 이 이 이름이다.
+          google:
+            # 구글 클라우드 콘솔(console.cloud.google.com) → API 및 서비스 → 사용자 인증 정보 →
+            # "OAuth 2.0 클라이언트 ID" 를 만들면 받는 값이다. "..." 부분을 실제 값으로 바꿔야 한다.
+            # 그 화면의 "승인된 리디렉션 URI" 에는 http://localhost:8080/login/oauth2/code/google 을 등록한다.
+            client-id:
+            # ⚠️ 비밀번호와 같은 값이다. 깃(Git)에 올리지 말고 환경 변수 등으로 따로 관리한다.
+            client-secret:
+            # 구글에 요청할 정보 범위. email(이메일), profile(이름·사진)
+            # ⚠️ openid 를 넣으면 OIDC 방식이 되어 OAuth2UserCustomService 대신 OidcUserService 가 쓰인다.
+            #    그러면 users 표에 저장하는 코드가 실행되지 않으므로 넣지 않는다.
+            scope:
+              - email
+              - profile
+
 # JWT 설정 그룹. JwtProperties 클래스(@ConfigurationProperties("jwt"))가 이 아래 값을 읽는다.
 jwt:
-  # 토큰 발급자(iss) 값. JWT 토큰 안에 기록된다.
-  issuer: ssk3924@gmail.com
-  # 토큰 서명에 쓰는 비밀 키.
+  # 토큰 발급자(iss) 값. 토큰 안에 기록된다.
+  issuer: ajufresh@gmail.com
+  # 토큰 서명에 쓰는 비밀 키. (secret_key → JwtProperties.secretKey, 느슨한 바인딩)
   # 수업용 값이다. 실제 서비스에서는 길고 무작위한 값을 환경 변수나 비밀
   # 저장소로 분리해야 한다. 이 키가 알려지면 누구나 유효한 토큰을 만들 수 있다.
   secret_key: study-springboot
+
+
 
 
 

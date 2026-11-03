@@ -83,11 +83,20 @@ public class Article {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    // [@Builder] Article.builder().title(...).content(...).build() 처럼 값을 하나씩 골라 넣어 객체를 만드는 방법을 자동으로 만들어 줍니다.
-    //   이 생성자가 실제로 값을 넣는 곳입니다.
-    //   AddArticleRequest.toEntity() 와 BlogService 테스트 코드에서 이 방식으로 Article 을 만듭니다.
+    // [11장 추가] 글쓴이
+    // 값: 토큰의 sub(이메일). 예) "gildong@gmail.com"
+    // nullable = false : 글쓴이 없이 글을 저장할 수 없습니다.
+    // ※ update() 메서드는 author 를 바꾸지 않습니다. 글쓴이는 처음 저장할 때 한 번만 정해집니다.
+    @Column(name = "author", nullable = false)
+    private String author;
+
+
+    // 빌더로 글을 만들 때 쓰는 생성자입니다.
+    // 예) Article.builder().author("gildong@gmail.com").title("안녕").content("첫 글").build()
+    // [11장] 첫 번째 값으로 author 가 추가되었습니다.
     @Builder
-    public Article(String title, String content, String imageUrl) {
+    public Article(String author,  String title, String content, String imageUrl) {
+        this.author = author;        //글쓴이 
         this.title = title;         // 매개변수로 받은 제목을 이 객체의 title 필드에 넣습니다.
         this.content = content;     // 본문을 content 필드에 넣습니다.
         this.imageUrl = imageUrl;   // 이미지 주소를 imageUrl 필드에 넣습니다.

@@ -48,6 +48,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 // List : 글 목록을 담는 자료형입니다.
+import java.security.Principal;
 import java.util.List;
 
 // [@RequiredArgsConstructor]
@@ -71,16 +72,19 @@ public class BlogApiController {
     // ---------------------------------------------------------------
     // 글 등록 : POST /api/articles
     // ---------------------------------------------------------------
-    // @PostMapping("/api/articles") : POST 방식으로 /api/articles 요청이 오면 이 메소드가 실행됩니다.
-    // @RequestBody AddArticleRequest request :
-    //   요청 본문의 JSON 을 AddArticleRequest 객체로 자동 변환해서 넣어 줍니다.
-    //   (JSON 의 title, content, imageUrl 키가 같은 이름의 필드에 들어갑니다)
-    // 반환 타입 ResponseEntity<Article> : 상태 코드와 Article 객체를 함께 돌려줍니다.
+    // ------------------------------------------------------------
+    // POST /api/articles : 글 등록
+    // 받는 값   : request(JSON 본문 → AddArticleRequest), principal(지금 요청한 사람, 스프링이 넣어 줌)
+    // 돌려주는 값: 201 Created + 저장된 글
+    // [11장] principal.getName()(이메일)을 글쓴이로 넘깁니다.
+    //   ⚠️ 시큐리티를 거치지 않고 부르면 principal 이 null 이라 오류가 납니다.
+    //      그래서 BlogApiControllerTest 는 Mockito 로 가짜 Principal 을 만들어 넣습니다.
+    // ------------------------------------------------------------
     @PostMapping("/api/articles")
-    public ResponseEntity<Article> addArticle(@RequestBody AddArticleRequest request) {
+    public ResponseEntity<Article> addArticle(@RequestBody AddArticleRequest request, Principal printPrincipal) {
 
         // blogService.save(request) : 글을 DB 에 저장하고, 저장된 Article(id 포함)을 받습니다.
-        Article savedArticle = blogService.save(request);
+        Article savedArticle = blogService.save(request, printPrincipal.getName());
 
         // ResponseEntity.status(HttpStatus.CREATED) : 상태 코드 201(Created, 생성됨)을 설정합니다.
         //   .body(savedArticle) : 응답 본문에 저장된 글을 넣습니다. 이 글은 JSON 으로 바뀌어 나갑니다.

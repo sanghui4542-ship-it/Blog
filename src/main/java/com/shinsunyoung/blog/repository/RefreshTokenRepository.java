@@ -54,6 +54,17 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     //   쓰는 이유: 사용자가 요청 보낸 리프레시 토큰이 실제로 저장된 것인지 확인하기 위해서입니다.
     Optional<RefreshToken> findByRefreshToken(String refreshToken);
 
+    // ===== [로그아웃 추가] deleteByUserId : 사용자 id 로 리프레시 토큰 행을 삭제합니다. =====
+    // 메소드 이름 규칙(쿼리 메소드) : deleteBy + 필드이름(UserId)
+    //   → 스프링 데이터 JPA 가 이름을 읽고 아래 동작을 자동으로 만들어 줍니다. (직접 SQL 을 쓰지 않습니다)
+    //     1) select * from refresh_token where user_id = ?   (먼저 지울 행을 조회해서 엔티티로 만들고)
+    //     2) delete from refresh_token where id = ?          (조회된 엔티티를 하나씩 삭제)
+    // ⚠️ 이름으로 만든 delete 메소드는 반드시 트랜잭션 안에서 실행해야 합니다.
+    //    그래서 이 메소드를 부르는 RefreshTokenService.delete() 에 @Transactional 을 붙였습니다.
+    //    (트랜잭션 없이 부르면 "No EntityManager with actual transaction available" 오류가 납니다)
+    // 로그아웃할 때 서버에 남아 있는 리프레시 토큰을 지워서, 그 토큰으로 새 액세스 토큰을 더는 못 받게 합니다.
+    void deleteByUserId(Long userId);
+
 
 
 }
